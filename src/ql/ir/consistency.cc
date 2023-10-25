@@ -117,7 +117,7 @@ private:
                     }
                     break;
 
-                case prim::OperandMode::IGNORE:
+                case prim::OperandMode::IGNORED:
                     break;
 
             }
@@ -138,7 +138,7 @@ public:
      * Behavior for unknown node types. Assume that means that no check is
      * needed.
      */
-    void visit_node(Node &node) override {
+    void visit_node(Node &) override {
     }
 
     /**
@@ -548,7 +548,7 @@ public:
                 }
                 break;
 
-            case prim::OperandMode::IGNORE:
+            case prim::OperandMode::IGNORED:
                 break;
         }
 
@@ -738,7 +738,7 @@ public:
     /**
      * Ensures that no sentinels have popped up in the IR.
      */
-    void visit_sentinel_statement(SentinelStatement &node) override {
+    void visit_sentinel_statement(SentinelStatement &) override {
         QL_ASSERT(false);
     }
 

@@ -4,8 +4,9 @@
 
 #include "ql/rmgr/resource_types/base.h"
 
-#include "ql/ir/ops.h"
 #include "ql/ir/describe.h"
+#include "ql/ir/ir_gen_ex.h"
+#include "ql/ir/ops.h"
 
 namespace ql {
 namespace rmgr {
@@ -137,7 +138,7 @@ utils::Bool Base::gate(
  * gate is schedulable for the given cycle and commit is set.
  */
 utils::Bool Base::gate(
-    utils::UInt cycle,
+    utils::Int cycle,
     const ir::compat::GateRef &gate,
     utils::Bool commit
 ) {

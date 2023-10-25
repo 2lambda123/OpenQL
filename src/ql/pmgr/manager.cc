@@ -355,21 +355,6 @@ static utils::Map<utils::Str, utils::Str> convert_global_to_pass_options() {
     }
 
     // Set options for the mapper.
-    const auto &initialplace = com::options::global["initialplace"];
-    if (initialplace.is_set()) {
-        if (initialplace.as_str() == "no") {
-            retval.set("enable_mip_placer") = "no";
-        } else {
-            if (initialplace.as_str() != "yes") {
-                QL_WOUT("timeout set for initial placement, but this is not supported right now");
-            }
-            retval.set("enable_mip_placer") = "yes";
-        }
-    }
-    const auto &initialplace2qhorizon = com::options::global["initialplace2qhorizon"];
-    if (initialplace2qhorizon.is_set()) {
-        retval.set("mip_horizon") = initialplace2qhorizon.as_str();
-    }
     const auto &mapper = com::options::global["mapper"];
     if (mapper.is_set() && mapper.as_str() != "no") {
         retval.set("route_heuristic") = mapper.as_str();
@@ -377,10 +362,6 @@ static utils::Map<utils::Str, utils::Str> convert_global_to_pass_options() {
     const auto &mapmaxalters = com::options::global["mapmaxalters"];
     if (mapmaxalters.is_set()) {
         retval.set("max_alternative_routes") = mapmaxalters.as_str();
-    }
-    const auto &mapinitone2one = com::options::global["mapinitone2one"];
-    if (mapinitone2one.is_set()) {
-        retval.set("initialize_one_to_one") = mapinitone2one.as_str();
     }
     const auto &mapassumezeroinitstate = com::options::global["mapassumezeroinitstate"];
     if (mapassumezeroinitstate.is_set()) {
@@ -436,6 +417,10 @@ static utils::Map<utils::Str, utils::Str> convert_global_to_pass_options() {
     if (mapreverseswap.is_set()) {
         retval.set("reverse_swap_if_better") = mapreverseswap.as_str();
     }
+    const auto &mapdecompositionrulepattern = com::options::global["mapdecompositionrulepattern"];
+    if (mapdecompositionrulepattern.is_set()) {
+        retval.set("decomposition_rule_name_pattern") = mapdecompositionrulepattern.as_str();
+    }
 
 #if 0   // FIXME: removed, use pass options
     // Set options for CC backend.
@@ -462,7 +447,7 @@ static utils::Map<utils::Str, utils::Str> convert_global_to_pass_options() {
  */
 Manager Manager::from_json(
     const utils::Json &json,
-    const Factory &factory
+    const Factory &/* factory */
 ) {
 
     // Shorthand.

@@ -134,7 +134,6 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set_target_properties(_openql PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
 endif()
 target_include_directories(_openql PRIVATE "${PYTHON_INCLUDE_DIRS}")
-add_backward(_openql)
 
 
 #=============================================================================#
@@ -152,16 +151,6 @@ else()
         FILES "$<TARGET_FILE:_openql>"
         DESTINATION "${OPENQL_PYTHON_DIR}"
         RENAME "${OPENQL_PYTHON_EXT}"
-    )
-endif()
-
-# On Windows, ship GLPK along with the wheel. On Mac this is handled by
-# delocate, and on manylinux by auditwheel, and in a local Linux install it's
-# not necessary.
-if(WIN32 AND GLPK_RUNTIME_LIBRARY)
-    install(
-        FILES "${GLPK_RUNTIME_LIBRARY}"
-        DESTINATION "${OPENQL_PYTHON_DIR}"
     )
 endif()
 

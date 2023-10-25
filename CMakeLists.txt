@@ -1,4 +1,13 @@
-cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+
+# CMake policies
+if(POLICY CMP0048)
+    cmake_policy(SET CMP0048 NEW)
+endif()
+cmake_policy(SET CMP0077 NEW)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 
 project(OpenQL C CXX)
 
@@ -78,35 +87,6 @@ option(
     ON
 )
 
-# Whether initial placement should be enabled. This requires one of GLPK, ILOG,
-# or COIN to be installed and findable by lemon's build system. Only GLPK seems
-# to work on present-day systems; on Linux it's probably in your package
-# manager, on Mac it's `brew install glpk`, and on Windows you can use winglpk
-# (see below). Unfortunately, GLPK is GPL-licensed, and therefore cannot be
-# distributed in an Apache project, so this option is off by default until a
-# non-GPL replacement is found.
-option(
-    WITH_INITIAL_PLACEMENT
-    "Whether initial placement support should be enabled"
-    OFF
-)
-
-# The following snippit helps finding GLPK from a Windows build package as
-# from https://sourceforge.net/projects/winglpk/files/winglpk/. Simply set
-# it to the root folder of the extracted zip file.
-if(WITH_INITIAL_PLACEMENT AND DEFINED ENV{WINGLPK_ROOT_DIR})
-    string(REPLACE "\\" "/" WINGLPK_ROOT_DIR "$ENV{WINGLPK_ROOT_DIR}")
-    set(GLPK_INCLUDE_DIR "${WINGLPK_ROOT_DIR}/src" CACHE STRING "glpk include")
-    mark_as_advanced(GLPK_INCLUDE_DIR)
-    file(GLOB GLPK_LIB "${WINGLPK_ROOT_DIR}/w64/glpk_4_??.lib")
-    set(GLPK_LIBRARY "${GLPK_LIB}" CACHE STRING "glpk library")
-    mark_as_advanced(GLPK_LIBRARY)
-    file(GLOB GLPK_DLL "${WINGLPK_ROOT_DIR}/w64/glpk_4_??.dll")
-    set(GLPK_RUNTIME_LIBRARY "${GLPK_DLL}" CACHE STRING "glpk runtime library")
-    mark_as_advanced(GLPK_RUNTIME_LIBRARY)
-    set(WITHOUT_GLPK_INSTALL YES)
-endif()
-
 # Definitions for checked vs unchecked STL containers w.r.t. iterator safety.
 # The checked versions can be considerably slower than the unchecked ones, so
 # by default they are only checked in debug builds.
@@ -115,6 +95,7 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
 else()
     set(OPENQL_DEBUG ON)
 endif()
+
 option(
     OPENQL_CHECKED_STL
     "Whether STL containers should be guarded against undefined behavior."
@@ -134,6 +115,14 @@ option(
     OPENQL_CHECKED_MAP
     "Whether ql::utils::Vec should guard against undefined behavior."
     ${OPENQL_CHECKED_STL}
+)
+
+# Make it possible to disable inclusion of debug symbols, in particular for PyPI wheels,
+# since there is a size limit of 100MB.
+option(
+    OPENQL_DEBUG_SYMBOLS
+    "Whether debug or release binaries should include debug symbols (it makes binaries a lot larger)."
+    ON
 )
 
 
@@ -168,8 +157,8 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-# Everything needs C++11 support.
-set(CMAKE_CXX_STANDARD 11)
+# Everything needs C++23 support.
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -180,11 +169,42 @@ set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 
 #=============================================================================#
+# Dependencies                                                                #
+#=============================================================================#
+
+find_package(Backward REQUIRED)
+find_package(cimg REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(fmt REQUIRED)
+find_package(highs REQUIRED)
+find_package(nlohmann_json REQUIRED)
+
+include(FetchContent)
+
+message(STATUS "Fetching cqasm")
+FetchContent_Declare(cqasm
+    message(STATUS "Fetching cqasm")
+    GIT_REPOSITORY https://github.com/QuTech-Delft/libqasm.git
+    GIT_TAG "9879dcc9ce5f750f9d2110d1cc81162be63ad9d7"
+)
+FetchContent_MakeAvailable(cqasm)
+
+# TODO: use Lemon Conan package when it is ready (https://github.com/conan-io/conan-center-index/pull/17338)
+# TODO: remove use of Lemon in project?
+message(STATUS "Fetching lemon")
+FetchContent_Declare(lemon
+    GIT_REPOSITORY https://github.com/rturrado/lemon.git
+    GIT_TAG "e70acea5764a97ab3b6d31b883300f3ce1587cde"
+)
+FetchContent_MakeAvailable(lemon)
+
+
+#=============================================================================#
 # Compile code generators                                                     #
 #=============================================================================#
 
-# Simple program that generates resource include files, to include the contents
-# of a file as a constant inside the OpenQL library.
+# Simple program that generates resource include files,
+# to include the contents of a file as a constant inside the OpenQL library.
 add_executable(resource src/resource/main.cpp)
 function(create_resource fname)
     set(infile "${CMAKE_CURRENT_SOURCE_DIR}/${fname}")
@@ -204,11 +224,6 @@ function(create_resource fname)
     )
     add_dependencies(ql ${target_name})
 endfunction()
-
-# Add tree-gen. We need to do this *only* to get access to the generate_tree
-# CMake function; everything else is handled implicitly because tree-gen is a
-# transitive dependency of libqasm.
-add_subdirectory(deps/libqasm/src/cqasm/tree-gen deps/tree-gen)
 
 
 #=============================================================================#
@@ -248,6 +263,7 @@ add_library(ql
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/ir/compat/detail/cqasm_reader.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/ir/prim.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/src/ql/ir/ir.gen.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/ir/ir_gen_ex.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/ir/ops.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/ir/operator_info.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/ir/describe.cc"
@@ -273,6 +289,7 @@ add_library(ql
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/sch/scheduler.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/map/expression_mapper.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/map/qubit_mapping.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/map/reference_updater.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/dec/unitary.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/dec/rules.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/com/dec/structure.cc"
@@ -316,7 +333,7 @@ add_library(ql
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/sch/schedule/detail/scheduler.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/sch/schedule/schedule.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/sch/list_schedule/list_schedule.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/map/qubits/place_mip/detail/algorithm.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/map/qubits/place_mip/detail/impl.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/map/qubits/place_mip/place_mip.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/map/qubits/map/detail/options.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/pass/map/qubits/map/detail/free_cycle.cc"
@@ -355,6 +372,34 @@ add_library(ql
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/api/cqasm_reader.cc"
 )
 
+# There is no distinction between public and private header files right now,
+# and they're all in the source directory.
+# Note the / at the end of the path;
+# this is necessary for the header files to be installed in the right location.
+target_include_directories(ql
+    SYSTEM PRIVATE "${Backward_INCLUDE_DIRS}"
+    SYSTEM PRIVATE "${cqasm_SOURCE_DIR}/include"
+    SYSTEM PRIVATE "${Eigen3_INCLUDE_DIRS}/unsupported"
+    SYSTEM PRIVATE "${highs_INCLUDE_DIRS}"
+    SYSTEM PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/_deps/lemon-src/"
+    SYSTEM PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/_deps/lemon-build/"
+    SYSTEM PRIVATE ${TREE_LIB_PUBLIC_INCLUDE}  # needed at all?
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/"
+    PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/src/"
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/include/"
+)
+
+target_link_libraries(ql
+    PRIVATE Backward::Backward
+    PUBLIC cqasm
+    PRIVATE Eigen3::Eigen
+    PRIVATE fmt::fmt
+    PRIVATE highs::highs
+    PRIVATE lemon
+    PUBLIC nlohmann_json::nlohmann_json
+)
+
 # Specify resources.
 create_resource("src/ql/arch/cc/resources/hwconf_default.json")
 create_resource("src/ql/arch/cc_light/resources/hwconf_default.json")
@@ -379,24 +424,24 @@ configure_file(
 # https://docs.microsoft.com/en-us/cpp/cpp/declspec?view=vs-2019
 target_compile_definitions(ql PRIVATE BUILDING_OPENQL)
 
-# There is no distinction between public and private header files right now,
-# and they'r all in the source directory. Note the / at the end of the path;
-# this is necessary for the header files to be installed in the right location.
-target_include_directories(ql
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/"
-    PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/src/"
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/"
-    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/include/"
-)
-
 # Configure compilation.
 set_property(TARGET ql PROPERTY POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_COMPILER_IS_GNUCXX)
-    target_compile_options(ql PRIVATE -Wall -Wfatal-errors -ggdb)
+    target_compile_options(ql PRIVATE
+        -Wall -Wextra -Werror -Wfatal-errors
+        -Wno-error=restrict
+        -Wno-error=deprecated-declarations
+    )
 elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    target_compile_options(ql PRIVATE -Wall -Wfatal-errors -ggdb -Wno-unused-local-typedef)
+    target_compile_options(ql PRIVATE
+        -Wall -Wextra -Werror -Wfatal-errors
+        -Wno-error=unused-private-field
+        -Wno-error=unused-but-set-variable
+    )
 elseif(MSVC)
-    target_compile_options(ql PRIVATE /MP /D_USE_MATH_DEFINES /EHsc /bigobj)
+    target_compile_options(ql PRIVATE
+        /MP /D_USE_MATH_DEFINES /EHsc /bigobj
+    )
 else()
     message(SEND_ERROR "Unknown compiler!")
 endif()
@@ -406,91 +451,20 @@ if(NOT MSVC AND "${CMAKE_BUILD_TYPE}" STREQUAL "Release")
     target_compile_options(ql PRIVATE -O3)
 endif()
 
+# Add debug information only for debug builds.
+if(NOT MSVC AND OPENQL_DEBUG_SYMBOLS)
+    target_compile_options(ql PRIVATE -ggdb)
+endif()
+
 # Use a mock version of unitary.cc if WITH_UNITARY_DECOMPOSITION is false.
 # This speeds up the build, but of course breaks unitary decomposition.
 if(NOT WITH_UNITARY_DECOMPOSITION)
     target_compile_definitions(ql PRIVATE WITHOUT_UNITARY_DECOMPOSITION)
 endif()
 
-# Enable GPL-based initial placement code if requested.
-if(WITH_INITIAL_PLACEMENT)
-    target_compile_definitions(ql PRIVATE INITIALPLACE)
+if("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
+    target_compile_definitions(ql PRIVATE NDEBUG)
 endif()
-
-
-#=============================================================================#
-# Configure, build, and link dependencies                                     #
-#=============================================================================#
-
-# pthreads --------------------------------------------------------------------
-
-# Look for thread support library (pthreads)
-find_package(Threads REQUIRED)
-target_link_libraries(ql PUBLIC ${CMAKE_THREAD_LIBS_INIT})
-
-
-# LEMON -----------------------------------------------------------------------
-
-# Configure LEMON. LEMON by itself exposes the "lemon" target to link against,
-# but it doesn't use target_include_directories(), so we have to do that here.
-add_subdirectory(deps/lemon)
-target_include_directories(lemon INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/deps/lemon"
-    "${CMAKE_CURRENT_BINARY_DIR}/deps/lemon"
-)
-target_link_libraries(ql PUBLIC lemon)
-
-# Initial places uses lemon's Mip; ensure that LEMON's configuration supports
-# it. Annoyingly, LEMON's build just silently removes it when it's missing the
-# necessary dependencies. Also annoying: the variable LEMON_HAVE_MIP is a
-# local variable, so we can't use it... and have to resort to checking this
-# cache variable instead.
-if(WITH_INITIAL_PLACEMENT AND NOT LEMON_DEFAULT_MIP)
-    message(SEND_ERROR "Missing ilog/coin/glpk (-dev/-devel) library for lemon (one of the three is needed for initial placement support)")
-endif()
-
-# Even more annoying stuff: LEMON doesn't install itself in the right place on
-# multilib systems (i.e. ones where the libdir is lib64 instead of just lib).
-# So to make sure it is found in the install tree, we have to install it in the
-# proper place ourselves. That would go something like this,
-#
-#     install(
-#         TARGETS lemon
-#         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#         COMPONENT library
-#     )
-#
-# but until CMake 3.13 the install directive MUST be in the directory where the
-# target is created, so we have to insert that piece of code into LEMON's own
-# CMakeLists.txt.
-
-
-# Eigen -----------------------------------------------------------------------
-
-# Wrap Eigen in an interface library to link against. Note that Eigen is only
-# used internally; its headers need not be installed or exposed to programs
-# linking against OpenQL.
-add_library(eigen INTERFACE)
-target_include_directories(eigen INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/deps/eigen/Eigen"
-    "${CMAKE_CURRENT_SOURCE_DIR}/deps/eigen/unsupported"
-)
-target_link_libraries(ql PRIVATE eigen)
-
-
-# nlohmann::json --------------------------------------------------------------
-
-set(JSON_BuildTests OFF CACHE INTERNAL "")
-add_subdirectory(deps/json)
-target_link_libraries(ql PUBLIC nlohmann_json::nlohmann_json)
-
-
-# libqasm ---------------------------------------------------------------------
-
-# Load libqasm. libqasm's CMakeLists expose the "cqasm" target to link against.
-add_subdirectory(deps/libqasm)
-target_link_libraries(ql PUBLIC cqasm)
 
 
 # X11/CImg ---------------------------------------------------------------------
@@ -513,96 +487,41 @@ endif()
 
 if(QL_VISUALIZER)
     target_compile_definitions(ql PRIVATE WITH_VISUALIZER)
-    target_include_directories(ql PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/deps/cimg/include/")
+    target_include_directories(ql SYSTEM PRIVATE "${cimg_INCLUDE_DIRS}")
+    target_link_libraries(ql PRIVATE cimg::cimg)
 endif()
-
-# backward-cpp ----------------------------------------------------------------
-
-# Stack trace helper library, nothing functional here.
-add_subdirectory(deps/backward-cpp)
-add_backward(ql)
-
-# add_backward doesn't set INTERFACE_LINK_LIBRARIES, only LINK_LIBRARIES. That
-# goes wrong when we're compiling statically, because said libraries are shared
-# and need to be included in the final link.
-set_property(TARGET ql APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${BACKWARD_LIBRARIES})
 
 
 #=============================================================================#
 # Testing                                                                     #
 #=============================================================================#
 
-# Include the tests directory if requested.
 if(OPENQL_BUILD_TESTS)
     enable_testing()
-
-    # Convenience function to add an integration test.
-    function(add_openql_test name source workdir)
-        add_executable("${name}" "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
-        target_link_libraries("${name}" ql)
-        add_test(
-            NAME "${name}"
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${workdir}"
-            COMMAND "${name}"
-        )
-    endfunction()
-
-    # Include the directories containing integration tests.
-    add_subdirectory(tests)
-    add_subdirectory(examples)
-
-    # Convenience function to add a unit test.
-    function(add_openql_unit_test source)
-        string(REPLACE "/" "_" name ${source})
-        string(REPLACE "_tests_" "_" name ${name})
-        string(REPLACE ".cc" "" name ${name})
-        set(name test_${name})
-        add_executable("${name}" "${CMAKE_CURRENT_SOURCE_DIR}/src/ql/${source}")
-        target_link_libraries("${name}" ql)
-        add_test(
-            NAME "${name}"
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-            COMMAND "${name}"
-        )
-    endfunction()
-
-    # Register unit tests.
-    file(
-        GLOB_RECURSE unit_tests
-        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/src/ql
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ql/*/tests/*.cc
-    )
-    foreach(unit_test ${unit_tests})
-        add_openql_unit_test(${unit_test})
-    endforeach()
-
-    # I hate CMake.
-    file(
-        GLOB_RECURSE unit_tests
-        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/src/ql
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ql/*/*/tests/*.cc
-    )
-    foreach(unit_test ${unit_tests})
-        add_openql_unit_test(${unit_test})
-    endforeach()
-    file(
-        GLOB_RECURSE unit_tests
-        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/src/ql
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ql/*/*/*/tests/*.cc
-    )
-    foreach(unit_test ${unit_tests})
-        add_openql_unit_test(${unit_test})
-    endforeach()
-    file(
-        GLOB_RECURSE unit_tests
-        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/src/ql
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ql/*/*/*/*/tests/*.cc
-    )
-    foreach(unit_test ${unit_tests})
-        add_openql_unit_test(${unit_test})
-    endforeach()
-
+    include(CTest)
+    include(GoogleTest)
+    set(CMAKE_CTEST_ARGUMENTS "--output-on-failure")
+    add_subdirectory(test)
 endif()
+
+
+#=============================================================================#
+# Debug info                                                                  #
+#=============================================================================#
+
+message(STATUS
+    "[${PROJECT_NAME}] Target include directories:\n"
+    "      Backward: ${Backward_INCLUDE_DIRS}\n"
+    "      CImg: ${CImg_INCLUDE_DIRS}\n"
+    "      cqasm: ${cqasm_SOURCE_DIR}/include\n"
+    "      Eigen3: ${Eigen3_INCLUDE_DIRS}/Eigen\n"
+    "      Eigen3/unsupported: ${Eigen3_INCLUDE_DIRS}/unsupported\n"
+    "      googletest: ${googletest_INCLUDE_DIRS}\n"
+    "      highs: ${highs_INCLUDE_DIRS}\n"
+    "      lemon-src: ${CMAKE_CURRENT_BINARY_DIR}/_deps/lemon-src/\n"
+    "      lemon-build: ${CMAKE_CURRENT_BINARY_DIR}/_deps/lemon-build/\n"
+    "      nlohmann_json/include: ${nlohmann_json_SOURCE_DIR}/include\n"
+)
 
 
 #=============================================================================#
@@ -630,14 +549,5 @@ install(
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
-
-# On Windows + MSVC, install the GLPK runtime library if one was found.
-if(GLPK_RUNTIME_LIBRARY)
-    install(
-        FILES "${GLPK_RUNTIME_LIBRARY}"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    )
-endif()
-
 
 endif() # NOT TARGET ql

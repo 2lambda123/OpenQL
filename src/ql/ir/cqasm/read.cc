@@ -11,17 +11,23 @@
 #include "ql/ir/old_to_new.h"
 #include "ql/com/ddg/build.h"
 #include "cqasm.hpp"
+#include "cqasm-version.hpp"
 
-namespace ql {
-namespace ir {
-namespace cqasm {
+#include <fmt/format.h>
+#include <stdexcept>
 
-namespace cq = ::cqasm::v1;
-namespace cqv = ::cqasm::v1::values;
-namespace cqty = ::cqasm::v1::types;
-namespace cqs = ::cqasm::semantic;
-namespace cqt = ::cqasm::tree;
+namespace ql::ir::cqasm {
+
 namespace cqe = ::cqasm::error;
+namespace cqt = ::cqasm::tree;
+namespace cqver = ::cqasm::version;
+
+namespace cq1 = ::cqasm::v1x;
+namespace cqs = ::cqasm::v1x::semantic;
+namespace cqty1 = ::cqasm::v1x::types;
+namespace cqv1 = ::cqasm::v1x::values;
+
+namespace cq3 = ::cqasm::v3x;
 
 /**
  * Marker used on cQASM nodes when they have been successfully used by
@@ -35,30 +41,30 @@ struct Used{};
  * libqasm should allow values of this type to be assigned. For qubits this is
  * always true, for other types it defaults to false.
  */
-static cqty::Type make_cq_type(
+static cqty1::Type make_cq_type(
     const DataTypeLink &ql_type,
     utils::Bool assignable = false
 ) {
-    cqty::Type cq_type;
+    cqty1::Type cq_type;
     if (ql_type->as_qubit_type()) {
-        cq_type.emplace<cqty::Qubit>();
+        cq_type.emplace<cqty1::Qubit>();
         assignable = true;
     } else if (ql_type->as_bit_type()) {
-        cq_type.emplace<cqty::Bool>();
+        cq_type.emplace<cqty1::Bool>();
     } else if (ql_type->as_int_type()) {
-        cq_type.emplace<cqty::Int>();
+        cq_type.emplace<cqty1::Int>();
     } else if (ql_type->as_real_type()) {
-        cq_type.emplace<cqty::Real>();
+        cq_type.emplace<cqty1::Real>();
     } else if (ql_type->as_complex_type()) {
-        cq_type.emplace<cqty::Complex>();
+        cq_type.emplace<cqty1::Complex>();
     } else if (auto rmat = ql_type->as_real_matrix_type()) {
-        cq_type.emplace<cqty::RealMatrix>(rmat->num_rows, rmat->num_cols);
+        cq_type.emplace<cqty1::RealMatrix>(rmat->num_rows, rmat->num_cols);
     } else if (auto cmat = ql_type->as_complex_matrix_type()) {
-        cq_type.emplace<cqty::ComplexMatrix>(cmat->num_rows, cmat->num_cols);
+        cq_type.emplace<cqty1::ComplexMatrix>(cmat->num_rows, cmat->num_cols);
     } else if (ql_type->as_string_type()) {
-        cq_type.emplace<cqty::String>();
+        cq_type.emplace<cqty1::String>();
     } else if (ql_type->as_json_type()) {
-        cq_type.emplace<cqty::Json>();
+        cq_type.emplace<cqty1::Json>();
     } else {
         QL_ASSERT(false);
     }
@@ -70,7 +76,7 @@ static cqty::Type make_cq_type(
 /**
  * Converts an operand type from the IR to a cQASM type.
  */
-static cqty::Type make_cq_op_type(const utils::One<OperandType> &ql_op_type) {
+static cqty1::Type make_cq_op_type(const utils::One<OperandType> &ql_op_type) {
     switch (ql_op_type->mode) {
         case prim::OperandMode::READ:
         case prim::OperandMode::LITERAL:
@@ -84,12 +90,12 @@ static cqty::Type make_cq_op_type(const utils::One<OperandType> &ql_op_type) {
  * Makes a reference to a register, modelled as a builtin function call with the
  * indices as its operands.
  */
-static cqv::Value make_cq_register_ref(
+static cqv1::Value make_cq_register_ref(
     const ObjectLink &ql_obj,
-    const cqv::Values &cq_indices,
+    const cqv1::Values &cq_indices,
     utils::Bool assignable = true
 ) {
-    cqv::Value cq_val = cqt::make<cqv::Function>(
+    cqv1::Value cq_val = cqt::make<cqv1::Function>(
         ql_obj->name,
         cq_indices,
         make_cq_type(ql_obj->data_type, assignable)
@@ -103,9 +109,9 @@ static cqv::Value make_cq_register_ref(
  * Makes a reference to an operand, modelled as a builtin function call with the
  * operand index as its operand.
  */
-static cqv::Value make_cq_operand_ref(
+static cqv1::Value make_cq_operand_ref(
     const utils::Vec<utils::Pair<ObjectLink, utils::Bool>> &ql_operands,
-    const cqv::Value &cq_index
+    const cqv1::Value &cq_index
 ) {
 
     // Select the operand based on the index.
@@ -133,7 +139,7 @@ static cqv::Value make_cq_operand_ref(
     }
 
     // Return the appropriate reference.
-    return make_cq_register_ref(ql_obj, cqv::Values(), assignable);
+    return make_cq_register_ref(ql_obj, cqv1::Values(), assignable);
 }
 
 /**
@@ -148,7 +154,7 @@ static cqt::Maybe<cqs::AnnotationData> find_pragma(
     public:
         utils::Str operation;
         cqt::Maybe<cqs::AnnotationData> data;
-        void visit_node(cqs::Node &node) override {
+        void visit_node(cqs::Node &) override {
         }
         void visit_instruction(cqs::Instruction &node) override {
             if (!data.empty()) return;
@@ -173,13 +179,13 @@ static cqt::Maybe<cqs::AnnotationData> find_pragma(
  */
 static utils::RawPtr<cqs::AnnotationData> find_annotation(
     const cqt::One<cqs::Node> &node,
-    const utils::Str &operation
+    const utils::Str &
 ) {
     class FindAnnotation : public cqs::RecursiveVisitor {
     public:
         utils::Str operation;
         utils::RawPtr<cqs::AnnotationData> data;
-        void visit_node(cqs::Node &node) override {
+        void visit_node(cqs::Node &) override {
         }
         void visit_annotation_data(cqs::AnnotationData &node) override {
             if (data) return;
@@ -216,7 +222,7 @@ static utils::RawPtr<cqs::AnnotationData> find_annotation(
 static void check_all_annotations_used(const cqt::One<cqs::Node> &node) {
     class FindAnnotation : public cqs::RecursiveVisitor {
     public:
-        void visit_node(cqs::Node &node) override {
+        void visit_node(cqs::Node &) override {
         }
         void visit_annotation_data(cqs::AnnotationData &node) override {
             if (node.interface == "ql") {
@@ -292,7 +298,7 @@ DataTypeLink parse_type_annotation(
 /**
  * Infers a matching OpenQL type for the given cQASM type.
  */
-DataTypeLink infer_ql_type(const Ref &ir, const cqty::Type &cq_type) {
+DataTypeLink infer_ql_type(const Ref &ir, const cqty1::Type &cq_type) {
     if (cq_type->as_qubit()) {
         return ir->platform->qubits->data_type;
     } else if (cq_type->as_bool()) {
@@ -359,7 +365,7 @@ find_last_goto_instruction(const cqt::One<cqs::Subcircuit> &subcircuit) {
     public:
         utils::RawPtr<cqs::GotoInstruction> goto_insn;
         utils::Bool only_insn = true;
-        void visit_node(cqs::Node &node) override {
+        void visit_node(cqs::Node &) override {
         }
         void visit_instruction_base(cqs::InstructionBase &node) override {
             if (auto insn = node.as_instruction()) {
@@ -377,7 +383,7 @@ find_last_goto_instruction(const cqt::One<cqs::Subcircuit> &subcircuit) {
             only_insn = false;
             goto_insn.reset();
         }
-        void visit_structured(cqs::Structured &node) override {
+        void visit_structured(cqs::Structured &) override {
             only_insn = false;
             goto_insn.reset();
         }
@@ -402,7 +408,7 @@ find_last_goto_instruction(const cqt::One<cqs::Subcircuit> &subcircuit) {
  * Converts a qubit/bit index to a static unsigned integer.
  */
 static utils::UInt convert_index(
-    const cqv::Value &cq_expr
+    const cqv1::Value &cq_expr
 ) {
     if (auto ci = cq_expr->as_const_int()) {
         if (ci->value < 0) {
@@ -424,7 +430,7 @@ static utils::UInt convert_index(
  */
 static ExpressionRef convert_expression(
     const Ref &ir,
-    const cqv::Value &cq_expr,
+    const cqv1::Value &cq_expr,
     utils::UInt sgmq_size = 1,
     utils::UInt sgmq_index = 0
 ) {
@@ -438,14 +444,14 @@ static ExpressionRef convert_expression(
     }
 
     if (auto cb = cq_expr->as_const_bool()) {
-        return make_bit_lit(ir, cb->value, as_type);
+        return make_bit_lit(ir->platform, cb->value, as_type);
     } else if (cq_expr->as_const_axis()) {
         QL_USER_ERROR("OpenQL does not support cQASM's axis data type");
     } else if (auto ci = cq_expr->as_const_int()) {
         return make_int_lit(ir, ci->value, as_type);
     } else if (auto cr = cq_expr->as_const_real()) {
         if (as_type.empty()) {
-            as_type = infer_ql_type(ir, cqv::type_of(cq_expr));
+            as_type = infer_ql_type(ir, cqv1::type_of(cq_expr));
         }
         if (!as_type->as_real_type()) {
             QL_USER_ERROR("cannot cast real number to type " << as_type->name);
@@ -453,7 +459,7 @@ static ExpressionRef convert_expression(
         return utils::make<RealLiteral>(cr->value, as_type);
     } else if (auto cc = cq_expr->as_const_complex()) {
         if (as_type.empty()) {
-            as_type = infer_ql_type(ir, cqv::type_of(cq_expr));
+            as_type = infer_ql_type(ir, cqv1::type_of(cq_expr));
         }
         if (!as_type->as_complex_type()) {
             QL_USER_ERROR("cannot cast complex number to type " << as_type->name);
@@ -461,7 +467,7 @@ static ExpressionRef convert_expression(
         return utils::make<ComplexLiteral>(cc->value, as_type);
     } else if (auto crm = cq_expr->as_const_real_matrix()) {
         if (as_type.empty()) {
-            as_type = infer_ql_type(ir, cqv::type_of(cq_expr));
+            as_type = infer_ql_type(ir, cqv1::type_of(cq_expr));
         }
         if (auto rmt = as_type->as_real_matrix_type()) {
             if (rmt->num_rows != crm->value.size_rows() || rmt->num_cols != crm->value.size_cols()) {
@@ -476,7 +482,7 @@ static ExpressionRef convert_expression(
         );
     } else if (auto ccm = cq_expr->as_const_complex_matrix()) {
         if (as_type.empty()) {
-            as_type = infer_ql_type(ir, cqv::type_of(cq_expr));
+            as_type = infer_ql_type(ir, cqv1::type_of(cq_expr));
         }
         if (auto cmt = as_type->as_complex_matrix_type()) {
             if (cmt->num_rows != ccm->value.size_rows() || cmt->num_cols != ccm->value.size_cols()) {
@@ -491,7 +497,7 @@ static ExpressionRef convert_expression(
         );
     } else if (auto cs = cq_expr->as_const_string()) {
         if (as_type.empty()) {
-            as_type = infer_ql_type(ir, cqv::type_of(cq_expr));
+            as_type = infer_ql_type(ir, cqv1::type_of(cq_expr));
         }
         if (!as_type->as_string_type()) {
             QL_USER_ERROR("cannot cast string to type " << as_type->name);
@@ -499,7 +505,7 @@ static ExpressionRef convert_expression(
         return utils::make<StringLiteral>(cs->value, as_type);
     } else if (auto cj = cq_expr->as_const_json()) {
         if (as_type.empty()) {
-            as_type = infer_ql_type(ir, cqv::type_of(cq_expr));
+            as_type = infer_ql_type(ir, cqv1::type_of(cq_expr));
         }
         if (!as_type->as_json_type()) {
             QL_USER_ERROR("cannot cast JSON to type " << as_type->name);
@@ -514,7 +520,7 @@ static ExpressionRef convert_expression(
             );
         }
         if (as_type.empty() || as_type == ir->platform->qubits->data_type) {
-            return make_qubit_ref(ir, convert_index(qr->index[sgmq_index]));
+            return make_qubit_ref(ir->platform, convert_index(qr->index[sgmq_index]));
         } else if (as_type == ir->platform->default_bit_type) {
             return make_bit_ref(ir, convert_index(qr->index[sgmq_index]));
         } else {
@@ -550,7 +556,7 @@ static ExpressionRef convert_expression(
                 "' to type " << as_type->name
             );
         }
-        return make_reference(ir, ql_object, {});
+        return make_reference(ir->platform, ql_object, {});
     } else if (auto fn = cq_expr->as_function()) {
         if (auto ql_object = fn->get_annotation_ptr<ObjectLink>()) {
 
@@ -559,11 +565,11 @@ static ExpressionRef convert_expression(
             for (const auto &cq_operand : fn->operands) {
                 ql_indices.push_back(convert_index(cq_operand));
             }
-            auto ref = make_reference(ir, *ql_object, ql_indices);
+            auto ref = make_reference(ir->platform, *ql_object, ql_indices);
             if (auto ql_type = fn->get_annotation_ptr<DataTypeLink>()) {
                 ref->data_type = *ql_type;
             }
-            return std::move(ref);
+            return ref;
 
         } else {
 
@@ -607,7 +613,7 @@ static utils::One<SetInstruction> convert_set_instruction(
             "does not match type of right-hand side (" << ql_rhs_type->name << ")"
         );
     }
-    return utils::make<SetInstruction>(ql_lhs, ql_rhs, ir::make_bit_lit(ir, true));
+    return utils::make<SetInstruction>(ql_lhs, ql_rhs, ir::make_bit_lit(ir->platform, true));
 }
 
 /**
@@ -734,7 +740,7 @@ static void convert_block(
                                 ql_operands.add(convert_expression(ir, cq_operand, sgmq_size, sgmq_index));
                             }
                         }
-                        ql_insns.push_back(make_instruction(ir, cq_insn->name, ql_operands, ql_condition));
+                        ql_insns.push_back(make_instruction(ir->platform, cq_insn->name, ql_operands, ql_condition));
 
                     } else if (
                         !options.measure_all_target.empty() &&
@@ -746,9 +752,9 @@ static void convert_block(
                         QL_ASSERT(ir->platform->qubits->shape.size() == 1);
                         for (utils::UInt q = 0; q < ir->platform->qubits->shape[0]; q++) {
                             ql_insns.push_back(make_instruction(
-                                ir,
+                                ir->platform,
                                 options.measure_all_target,
-                                {make_qubit_ref(ir, q)},
+                                {make_qubit_ref(ir->platform, q)},
                                 ql_condition.clone()
                             ));
                         }
@@ -789,7 +795,7 @@ static void convert_block(
                                 ql_operands[1] = x;
                             }
 
-                            ql_insns.push_back(make_instruction(ir, cq_insn->name, ql_operands, ql_condition));
+                            ql_insns.push_back(make_instruction(ir->platform, cq_insn->name, ql_operands, ql_condition));
                         }
 
                     }
@@ -819,7 +825,7 @@ static void convert_block(
                             if (!ql_condition.empty()) {
                                 ql_cond_insn->condition = ql_condition.clone();
                             } else {
-                                ql_cond_insn->condition = make_bit_lit(ir, true);
+                                ql_cond_insn->condition = make_bit_lit(ir->platform, true);
                             }
                         }
                     } else if (!ql_condition.empty()) {
@@ -848,7 +854,7 @@ static void convert_block(
             ) {
 
                 // Figure out which objects are being used by this bundle.
-                com::ddg::EventGatherer eg{ir};
+                com::ddg::EventGatherer eg{ir->platform};
                 for (const auto &ql_insn : ql_bundle) {
                     eg.add_statement(ql_insn);
                 }
@@ -872,7 +878,7 @@ static void convert_block(
 
                 // Construct barriers sensitive to all used objects and add them
                 // to the front and back of the "bundle".
-                auto ql_barrier_begin = make_instruction(ir, "barrier", ql_operands);
+                auto ql_barrier_begin = make_instruction(ir->platform, "barrier", ql_operands);
                 auto ql_barrier_end = ql_barrier_begin.clone();
                 ql_barrier_begin->cycle = ql_bundle.front()->cycle;
                 ql_barrier_end->cycle = ql_bundle.back()->cycle;
@@ -1052,10 +1058,10 @@ static void convert_block(
  * Loads a platform from the `@ql.platform` annotation in the given parse
  * result.
  */
-static ir::compat::PlatformRef load_platform(const cq::parser::ParseResult &pres) {
+static ir::compat::PlatformRef load_platform(const cq1::parser::ParseResult &pres) {
 
     // Look for the annotation.
-    cqt::One<cq::ast::ExpressionList> platform_annot_operands;
+    cqt::One<cq1::ast::ExpressionList> platform_annot_operands;
     if (auto prog = pres.root->as_program()) {
         for (const auto &stmt : prog->statements->items) {
             auto bun = stmt->as_bundle();
@@ -1119,7 +1125,7 @@ static ir::compat::PlatformRef load_platform(const cq::parser::ParseResult &pres
  * the filename if one exists for the purpose of generating better error
  * messages.
  */
-void read(
+void read_v1(
     const Ref &ir,
     const utils::Str &data,
     const utils::Str &fname,
@@ -1127,10 +1133,10 @@ void read(
 ) {
 
     // Start by parsing the file without analysis.
-    auto pres = cq::parser::parse_string(data, fname);
+    auto pres = cq1::parser::parse_string(data, fname);
     if (!pres.errors.empty()) {
         utils::StrStrm errors;
-        errors << "failed to parse " << fname << " for the following reasons:";
+        errors << "failed to parse '" << data << "' for the following reasons:";
         for (const auto &error : pres.errors) {
             QL_EOUT(error);
             errors << "\n  " << error;
@@ -1147,7 +1153,7 @@ void read(
     }
 
     // Create an analyzer for files with a version up to cQASM 1.2.
-    cq::analyzer::Analyzer a{"1.2"};
+    cq1::analyzer::Analyzer a{"1.2"};
 
     // Add the default constant-propagation functions and mappings such as true
     // and false.
@@ -1164,7 +1170,7 @@ void read(
         a.register_function(
             dt->name,
             {make_cq_type(dt)},
-            [dt](const cqv::Values &ops) -> cqv::Value {
+            [dt](const cqv1::Values &ops) -> cqv1::Value {
                 ops[0]->set_annotation<DataTypeLink>(dt);
                 return ops[0];
             }
@@ -1175,12 +1181,12 @@ void read(
     a.register_function(
         ir->platform->default_bit_type->name,
         {make_cq_type(ir->platform->qubits->data_type)},
-        [ir](const cqv::Values &ops) -> cqv::Value {
+        [ir](const cqv1::Values &ops) -> cqv1::Value {
             if (auto qrefs = ops[0]->as_qubit_refs()) {
-                auto brefs = cqt::make<cqv::BitRefs>();
+                auto brefs = cqt::make<cqv1::BitRefs>();
                 brefs->index = qrefs->index;
                 brefs->set_annotation<DataTypeLink>(ir->platform->default_bit_type);
-                return std::move(brefs);
+                return brefs;
             } else if (auto fun = ops[0]->as_function()) {
                 fun->return_type = make_cq_type(ir->platform->default_bit_type);
                 ops[0]->set_annotation<DataTypeLink>(ir->platform->default_bit_type);
@@ -1202,11 +1208,11 @@ void read(
             if (obj->shape.size() != 1) {
                 QL_ICE("main qubit register must be one-dimensional");
             }
-            auto q = cqt::make<cqv::QubitRefs>();
-            auto b = cqt::make<cqv::BitRefs>();
+            auto q = cqt::make<cqv1::QubitRefs>();
+            auto b = cqt::make<cqv1::BitRefs>();
             for (utils::UInt i = 0; i < obj->shape[0]; i++) {
-                q->index.add(cqt::make<cqv::ConstInt>(i));
-                b->index.add(cqt::make<cqv::ConstInt>(i));
+                q->index.add(cqt::make<cqv1::ConstInt>(i));
+                b->index.add(cqt::make<cqv1::ConstInt>(i));
             }
             a.register_mapping("q", q);
             a.register_mapping("b", b);
@@ -1217,11 +1223,11 @@ void read(
             // for each index dimension. The function always returns a builtin
             // function call object, which we'll convert to the appropriate
             // register reference after libqasm's analysis.
-            cqty::Types types;
+            cqty1::Types types;
             for (utils::UInt i = 0; i < obj->shape.size(); i++) {
-                types.emplace<cqty::Int>();
+                types.emplace<cqty1::Int>();
             }
-            a.register_function(obj->name, types, [obj](const cqv::Values &ops) -> cqv::Value {
+            a.register_function(obj->name, types, [obj](const cqv1::Values &ops) -> cqv1::Value {
                 return make_cq_register_ref(obj, ops);
             });
 
@@ -1238,9 +1244,9 @@ void read(
     // NB: this is to support new style instruction decomposition, where op(n) refers
     // to the actual operands of an instruction.
     if (!options.operands.empty()) {
-        cqty::Types types;
-        types.emplace<cqty::Int>();
-        a.register_function("op", types, [options](const cqv::Values &ops) -> cqv::Value {
+        cqty1::Types types;
+        types.emplace<cqty1::Int>();
+        a.register_function("op", types, [options](const cqv1::Values &ops) -> cqv1::Value {
             return make_cq_operand_ref(options.operands, ops[0]);
         });
     }
@@ -1256,12 +1262,12 @@ void read(
     // Note: these functions are added using calls to 'add_function_type()' in
     // 'Ref convert_old_to_new(const compat::PlatformRef &old)'
     for (const auto &fun : ir->platform->functions) {
-        cqty::Types cq_types;
+        cqty1::Types cq_types;
         for (const auto &ql_op_type : fun->operand_types) {
             cq_types.add(make_cq_op_type(ql_op_type));
         }
-        a.register_function(fun->name, cq_types, [fun](const cqv::Values &ops) -> cqv::Value {
-            cqv::Value cq_val = cqt::make<cqv::Function>(
+        a.register_function(fun->name, cq_types, [fun](const cqv1::Values &ops) -> cqv1::Value {
+            cqv1::Value cq_val = cqt::make<cqv1::Function>(
                 fun->name,
                 ops,
                 make_cq_type(fun->return_type)
@@ -1279,7 +1285,7 @@ void read(
     auto res = a.analyze(pres);
     if (!res.errors.empty()) {
         utils::StrStrm errors;
-        errors << "failed to analyze " << fname << " for the following reasons:";
+        errors << "failed to analyze '" << data << "' for the following reasons:";
         for (const auto &error : res.errors) {
             QL_EOUT(error);
             errors << "\n  " << error;
@@ -1514,6 +1520,40 @@ void read(
 
 }
 
+void read_v3(
+    const Ref & /* ir */,
+    const utils::Str &data,
+    const utils::Str &fname,
+    const ReadOptions & /* options */
+) {
+    cq3::parser::parse_string(data, fname);
+}
+
+/**
+ * Reads a cQASM file into the IR.
+ * If reading is successful, ir->program is completely replaced.
+ * data represents the cQASM file contents,
+ * fname specifies the filename if one exists for the purpose of generating better error messages.
+ */
+void read(
+    const Ref &ir,
+    const utils::Str &data,
+    const utils::Str &fname,
+    const ReadOptions &options
+) {
+    auto pres = cqver::parse_string(data, fname);
+    auto version = cqver::parse_string(data, fname);
+    if (version <= cqver::Version("1.2")) {
+        read_v1(ir, data, fname, options);
+    } else if (version == cqver::Version("3.0")) {
+        read_v3(ir, data, fname, options);
+    } else {
+        auto error = fmt::format("'{}' is an invalid cQASM version", fmt::join(version, "."));
+        QL_EOUT(error);
+        QL_USER_ERROR(error);
+    }
+}
+
 /**
  * Same as read(), but given a file to load, rather than loading from a string.
  */
@@ -1537,7 +1577,7 @@ ir::compat::PlatformRef read_platform(
 ) {
 
     // Read the file without analyzing it.
-    auto pres = cq::parser::parse_string(data, fname);
+    auto pres = cq1::parser::parse_string(data, fname);
     if (!pres.errors.empty()) {
         utils::StrStrm errors;
         errors << "failed to parse " << fname << " for the following reasons:";
@@ -1561,6 +1601,4 @@ ir::compat::PlatformRef read_platform_from_file(const utils::Str &fname) {
     return read_platform(data, fname);
 }
 
-} // namespace cqasm
-} // namespace ir
-} // namespace ql
+} // namespace ql::ir::cqasm

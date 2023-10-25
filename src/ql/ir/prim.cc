@@ -286,7 +286,7 @@ std::ostream &operator<<(std::ostream &os, const OperandMode &am) {
         case OperandMode::COMMUTE_Y: return os << "commute-Y";
         case OperandMode::COMMUTE_Z: return os << "commute-Z";
         case OperandMode::MEASURE:   return os << "measure";
-        case OperandMode::IGNORE:    return os << "ignore";
+        case OperandMode::IGNORED:    return os << "ignore";
     }
     return os << "unknown";
 }
@@ -355,11 +355,11 @@ std::ostream &operator<<(std::ostream &os, const Architecture &arch) {
 //==============================================================================
 
 template <>
-void serialize(const ResourceManager &obj, utils::tree::cbor::MapWriter &map) {
+void serialize(const ResourceManager &, utils::tree::cbor::MapWriter &) {
 }
 
 template <>
-ResourceManager deserialize(const utils::tree::cbor::MapReader &map) {
+ResourceManager deserialize(const utils::tree::cbor::MapReader &) {
     return ResourceManager();
 }
 
