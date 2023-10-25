@@ -181,11 +181,13 @@ find_package(nlohmann_json REQUIRED)
 
 include(FetchContent)
 
+
+# QI2 integration test: temporarily using a commit from libqasm/qi2_integration_test
 message(STATUS "Fetching cqasm")
 FetchContent_Declare(cqasm
     message(STATUS "Fetching cqasm")
     GIT_REPOSITORY https://github.com/QuTech-Delft/libqasm.git
-    GIT_TAG "9879dcc9ce5f750f9d2110d1cc81162be63ad9d7"
+    GIT_TAG "c0ecb535a702b4bc03b633fe8c946b1d9b19e394"
 )
 FetchContent_MakeAvailable(cqasm)
 
@@ -194,7 +196,7 @@ FetchContent_MakeAvailable(cqasm)
 message(STATUS "Fetching lemon")
 FetchContent_Declare(lemon
     GIT_REPOSITORY https://github.com/rturrado/lemon.git
-    GIT_TAG "e70acea5764a97ab3b6d31b883300f3ce1587cde"
+    GIT_TAG "300dda4d40d9531e66914d464c64746646bcbd8c"
 )
 FetchContent_MakeAvailable(lemon)
 
