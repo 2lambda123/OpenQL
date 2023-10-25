@@ -455,11 +455,13 @@ static GateRef load_instruction(
  * Loads the platform members from the given JSON data and optional
  * auxiliary compiler configuration file.
  */
+// FIXME: add parameter to disable loading parts not used by new IR
 void Platform::load(
     utils::Json &platform_cfg,
     const utils::Str &platform_config_fname,
     const utils::Str &compiler_config
 ) {
+    QL_DOUT("compatibility load of configuration from json");
     platform_config = platform_cfg;
     arch::Factory arch_factory = {};
 
@@ -540,13 +542,16 @@ void Platform::load(
     // Do architecture-specific preprocessing before anything else.
     architecture->preprocess_platform(platform_config);
 
+    QL_DOUT("compatibility platform load has determined architecture etc.,  now go for hardware_settings");
+
     // load hardware_settings
+    QL_DOUT("loading hardware_settings");
     if (platform_config.count("hardware_settings") <= 0) {
-        QL_FATAL("'hardware_settings' section is not specified in the hardware config file");
+        QL_JSON_ERROR("'hardware_settings' section is not specified in the hardware config file");
     } else {
         hardware_settings = platform_config["hardware_settings"];
         if (hardware_settings.count("qubit_number") <= 0) {
-            QL_FATAL("qubit number of the platform is not specified in the configuration file !");
+            QL_JSON_ERROR("qubit number of the platform is not specified in the configuration file !");
         } else {
             qubit_count = hardware_settings["qubit_number"];
         }
@@ -572,9 +577,11 @@ void Platform::load(
         }
     }
 
+    QL_DOUT("compatibility platform load go for instruction_settings, resources and topology");
+
     // load instruction_settings
     if (platform_config.count("instructions") <= 0) {
-        QL_FATAL("'instructions' section is not specified in the hardware config file");
+        QL_JSON_ERROR("'instructions' section is not specified in the hardware config file");
     } else {
         instruction_settings = platform_config["instructions"];
     }
@@ -595,7 +602,8 @@ void Platform::load(
         topology.emplace(qubit_count, platform_config["topology"]);
     }
 
-    // load instructions
+    // load instructions into instruction_map
+    QL_DOUT("loading instructions");    // NB: these are unused if we exclusively use the new IR
     const utils::Json &instructions = platform_config["instructions"];
     static const std::regex comma_space_pattern("\\s*,\\s*");
 
@@ -625,10 +633,13 @@ void Platform::load(
         QL_DOUT("instruction '" << instr_name << "' loaded.");
     }
 
+    QL_DOUT("compatibility platform load gate_decomposition");
+
     // load optional section gate_decomposition
     // Examples:
     // - Parametrized gate-decomposition: "cl_2 %0": ["rxm90 %0", "rym90 %0"]
     // - Specialized gate-decomposition:  "rx180 q0" : ["x q0"]
+    QL_DOUT("loading gate_decomposition");    // NB: these are unused if we exclusively use the new IR
     if (platform_config.count("gate_decomposition") > 0) {
         const utils::Json &gate_decomposition = platform_config["gate_decomposition"];
         for (auto it = gate_decomposition.begin();
@@ -660,12 +671,13 @@ void Platform::load(
             // check that we're looking at array
             utils::Json sub_instructions = *it;
             if (!sub_instructions.is_array()) {
-                QL_FATAL(
+                QL_JSON_ERROR(
                     "gate decomposition rule for '" << comp_ins << "' is "
                     "malformed (not an array)"
                 );
             }
 
+            QL_DOUT(" took sub_instructions from json for composite instr : " << comp_ins);
             GateRefs gs;
             for (utils::UInt i = 0; i < sub_instructions.size(); i++) {
                 // standardize name of sub instruction
@@ -679,7 +691,7 @@ void Platform::load(
                     gs.add(instruction_map.at(sub_ins));
                 } else if (sub_ins.find("cond(") !=
                            utils::Str::npos) {              // conditional gate?
-                    QL_FATAL("conditional gate not supported in gate_decomposition: '" << sub_ins << "'");
+                    QL_JSON_ERROR("conditional gate not supported in gate_decomposition: '" << sub_ins << "'");
                 } else if (sub_ins.find("%") !=
                            utils::Str::npos) {              // parameterized composite gate? FIXME: no syntax check
                     // adding new sub ins if not already available, e.g. "x %0"
@@ -696,14 +708,15 @@ void Platform::load(
 #else
                     // for specialized custom instructions, raise error if instruction
                     // is not already available
-                    QL_FATAL("custom instruction not found for '" << sub_ins << "'");
+                    QL_JSON_ERROR("custom instruction not found for '" << sub_ins << "'");
 #endif
                 }
             }
+            QL_DOUT(" added sub_instructions to 'gate references' for composite instr, replace composite in instruction_map : " << comp_ins);
             instruction_map.set(comp_ins).emplace<gate_types::Composite>(comp_ins, gs);
         }
     }
-
+    QL_DOUT("compatibility load of configuration from json [DONE]");
 }
 
 /**
@@ -731,9 +744,9 @@ Platform::Platform(
         try {
             config = utils::load_json(platform_config);
         } catch (utils::Json::exception &e) {
-            QL_FATAL(
+            QL_JSON_ERROR(
                 "failed to load the hardware config file : malformed json file: \n\t"
-                    << utils::Str(e.what()));
+                << utils::Str(e.what()));
         }
         platform_config_fname = platform_config;
     }
@@ -800,11 +813,12 @@ void Platform::dump_info(std::ostream &os, utils::Str line_prefix) const {
 /**
  * Returns the JSON data for a custom gate, throwing a semi-useful
  * exception if the instruction is not found.
+ * NB: iname can refer to specialized or generalized gate name
  */
 const utils::Json &Platform::find_instruction(const utils::Str &iname) const {
     // search the JSON defined instructions, to prevent JSON exception if key does not exist
     if (!QL_JSON_EXISTS(instruction_settings, iname)) {
-        QL_FATAL("JSON file: instruction not found: '" << iname << "'");
+        QL_JSON_ERROR("instruction not found: '" << iname << "'");
     }
     return instruction_settings[iname];
 }

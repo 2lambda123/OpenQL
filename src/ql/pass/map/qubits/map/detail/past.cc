@@ -7,6 +7,9 @@
 #include "ql/utils/filesystem.h"
 #include "ql/pass/map/qubits/place_mip/detail/algorithm.h"
 
+// uncomment next line to enable multi-line dumping
+// #define MULTI_LINE_LOG_DEBUG
+
 namespace ql {
 namespace pass {
 namespace map {
@@ -68,9 +71,14 @@ void Past::print_fc() const{
  * is at least debug.
  */
 void Past::debug_print_fc() const {
-    if (utils::logger::log_level >= utils::logger::LogLevel::LOG_DEBUG) {
+#ifdef MULTI_LINE_LOG_DEBUG
+    QL_IF_LOG_DEBUG {
+        QL_DOUT("FreeCycle dump:");
         fc.print("");
     }
+#else
+    QL_DOUT("FreeCycle dump (disabled)");
+#endif
 }
 
 /**
@@ -512,10 +520,13 @@ void Past::add_and_schedule(const ir::compat::GateRef &gate) {
  * map to it.
  */
 utils::UInt Past::map_qubit(utils::UInt virt) {
+    QL_DOUT("map_qubit(virt=" << virt);
     utils::UInt r = v2r[virt];
     if (r == com::map::UNDEFINED_QUBIT) {
+        QL_DOUT("... map_qubit, virt qubit maps to undefined real qubit, so allocate it");
         r = v2r.allocate(virt);
     }
+    QL_DOUT("-> map_qubit(virt=" << virt << " mapped to real=" << r);
     return r;
 }
 
@@ -528,7 +539,7 @@ static void strip_name(utils::Str &name) {
     if (p != utils::Str::npos) {
         name = name.substr(0,p);
     }
-    QL_DOUT("... after strip_name name=" << name);
+    QL_DOUT("... after strip_name name='" << name << "'");
 }
 
 /**
@@ -591,8 +602,8 @@ void Past::make_real(const ir::compat::GateRef &gate, ir::compat::GateRefs &circ
 
     if (gate->swap_params.part_of_swap) {
         QL_DOUT("original gate was swap/move, adding swap/move parameters for gates in decomposed circuit");
-        for (ir::compat::GateRef &gate : circuit) {
-            gate->swap_params = gate->swap_params;
+        for (ir::compat::GateRef &it : circuit) {
+            it->swap_params = gate->swap_params;
         }
     }
 }
@@ -631,10 +642,12 @@ void Past::make_primitive(const ir::compat::GateRef &gate, ir::compat::GateRefs 
             gate->cond_operands
         );
         if (!created) {
-            QL_FATAL("MakePrimtive: failed creating gate " << prim_gname << " or " << gname);
+            QL_FATAL("make_primitive: failed creating gate " << prim_gname << " or " << gname);
         }
+        QL_DOUT("... make_primitive: new gate created for: " << gname);
+    } else {
+        QL_DOUT("... make_primitive: new gate created for: " << prim_gname);
     }
-    QL_DOUT("... MakePrimtive: new gate created for: " << prim_gname << " or " << gname);
 
     if (gate->swap_params.part_of_swap) {
         QL_DOUT("original gate was swap/move, adding swap/move parameters for gates in decomposed circuit");

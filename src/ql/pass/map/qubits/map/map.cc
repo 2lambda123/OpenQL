@@ -5,12 +5,15 @@
 #include "ql/pass/map/qubits/map/map.h"
 
 #include "detail/mapper.h"
+#include "ql/pmgr/factory.h"
 
 namespace ql {
 namespace pass {
 namespace map {
 namespace qubits {
 namespace map {
+
+bool MapQubitsPass::is_pass_registered = pmgr::Factory::register_pass<MapQubitsPass>("map.qubits.Map");
 
 /**
  * Dumps docs for the qubit mapper.
@@ -463,9 +466,9 @@ pmgr::pass_types::NodeType MapQubitsPass::on_construct(
     auto swap_selection_mode = options["swap_selection_mode"].as_str();
     if (swap_selection_mode == "one") {
         parsed_options->swap_selection_mode = detail::SwapSelectionMode::ONE;
-    } else if (path_selection_mode == "all") {
+    } else if (swap_selection_mode == "all") {
         parsed_options->swap_selection_mode = detail::SwapSelectionMode::ALL;
-    } else if (path_selection_mode == "earliest") {
+    } else if (swap_selection_mode == "earliest") {
         parsed_options->swap_selection_mode = detail::SwapSelectionMode::EARLIEST;
     } else {
         QL_ASSERT(false);

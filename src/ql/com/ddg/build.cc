@@ -164,8 +164,12 @@ void EventGatherer::add_statement(const ir::StatementRef &stmt) {
         } else if (auto dyn = stmt->as_dynamic_loop()) {
             add_expression(ir::prim::OperandMode::READ, dyn->condition);
             if (auto forl = stmt->as_for_loop()) {
-                add_statement(forl->initialize);
-                add_statement(forl->update);
+                if (!forl->initialize.empty()) {
+                    add_statement(forl->initialize);
+                }
+                if (!forl->update.empty()) {
+                    add_statement(forl->update);
+                }
             } else if (stmt->as_repeat_until_loop()) {
                 // no further dependencies
             } else {
@@ -211,11 +215,6 @@ void EventGatherer::reset() {
  */
 class Builder {
 private:
-
-    /**
-     * IR root node.
-     */
-    const ir::Ref &ir;
 
     /**
      * The block that we're building for.
@@ -266,7 +265,14 @@ private:
          * returns true when the events are caused by the same node.
          */
         utils::Bool commutes_with(const EventNodePair &enp) const {
-            if (node == enp.node) return true;
+
+            // Events belonging to the same statement commute with each other!
+            // This is a necessary detail to make the DDG builder state machine
+            // work.
+            if (node == enp.node) {
+                return true;
+            }
+
             return event.commutes_with(enp.event);
         }
 
@@ -390,7 +396,7 @@ private:
         // from the commuting list.
         auto it = commuting.begin();
         while (it != commuting.end()) {
-            if (!it->event.commutes_with(incoming.event)) {
+            if (!it->commutes_with(incoming)) {
                 evict_from_commuting(it);
             } else {
                 ++it;
@@ -416,7 +422,12 @@ private:
         }
         if (!any_edge) {
             for (const auto &nc : global_write) {
-                QL_ASSERT(!nc.get().commutes_with(incoming));
+                if(nc.get().commutes_with(incoming)) {
+                    QL_ICE(
+                        "DDG build: event '" + ir::describe(incoming.statement)
+                        + "' commutes with '" + ir::describe(nc.get().statement) + "'"
+                    );
+                }
                 add_edge(nc, incoming);
             }
         }
@@ -444,6 +455,18 @@ private:
         gatherer.reset();
         gatherer.add_statement(statement);
 
+        // If no events were caused by the statement, for example for a
+        // while(true) {}, we'll have to upgrade the statement to a barrier,
+        // because otherwise it becomes an island in the DDG. Note that
+        // normally such loops can be placed anywhere per the normal rules
+        // (the DDG builder does not try to solve the halting problem and
+        // assumes that all code halts within finite time), so it's a good idea
+        // to place barriers around code that never terminates to ensure that
+        // the code that should be run before it is actually run before it.
+        if (gatherer.get().empty()) {
+            gatherer.add_reference(ir::prim::OperandMode::BARRIER, {});
+        }
+
         // Process the events.
         for (const auto &event : gatherer.get()) {
             process_event({event, node, statement});
@@ -462,7 +485,6 @@ public:
         utils::Bool commute_multi_qubit,
         utils::Bool commute_single_qubit
     ) :
-        ir(ir),
         block(block),
         gatherer(ir),
         order_accumulator(0)

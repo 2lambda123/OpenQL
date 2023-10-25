@@ -19,6 +19,9 @@
 #include "ql/com/options.h"
 #include "ql/com/dec/unitary.h"
 
+// uncomment next line to enable multi-line dumping
+// #define MULTI_LINE_LOG_DEBUG
+
 namespace ql {
 namespace ir {
 namespace compat {
@@ -553,8 +556,10 @@ Bool Kernel::add_custom_gate_if_available(
 
     // first check if a specialized custom gate is available
     // a specialized custom gate is of the form: "cz q0 q3"
+    // QL_DOUT("is specialized custom gate available for for instr " << instr);
     auto it = platform->instruction_map.find(instr);
     if (it == platform->instruction_map.end()) {
+        // QL_DOUT("is parameterized custom gate available for gate " << gname);
         it = platform->instruction_map.find(gname);
     }
     if (it == platform->instruction_map.end()) {
@@ -602,6 +607,7 @@ void Kernel::get_decomposed_ins(
         QL_DOUT("  sub ins: " << sub_ins);
         auto it = platform->instruction_map.find(sub_ins);
         if (it != platform->instruction_map.end()) {
+            // QL_DOUT("  sub ins found in instruction_map: " << sub_ins);
             sub_instructions.push_back(sub_ins);
         } else {
             QL_ICE("gate decomposition not available for '" << sub_ins << "' in the target platform");
@@ -643,14 +649,14 @@ Bool Kernel::add_spec_decomposed_gate_if_available(
         // check gate type
         QL_DOUT("specialized composite gate found for " << instr_parameterized);
         if (it->second->type() == GateType::COMPOSITE) {
-            QL_DOUT("composite gate type");
+            QL_DOUT("gate type is composite gate type " << instr_parameterized);
         } else {
-            QL_DOUT("not a composite gate type");
+            QL_DOUT("not a composite gate type " << instr_parameterized);
             return false;
         }
         auto gptr = it->second.as<gate_types::Composite>();
         if (gptr.empty()) {
-            QL_DOUT("not a composite gate type");
+            QL_DOUT("but its gate pointer is empty, not a composite gate type");
             return false;
         }
 
@@ -659,7 +665,7 @@ Bool Kernel::add_spec_decomposed_gate_if_available(
         get_decomposed_ins(*gptr, sub_instructions);
         for (auto &sub_ins : sub_instructions) {
             // extract name and qubits
-            QL_DOUT("Adding sub ins: " << sub_ins);
+            QL_DOUT("Adding sub ins: " << sub_ins << " of composite " << instr_parameterized);
             std::replace(sub_ins.begin(), sub_ins.end(), ',', ' ');    // FIXME: perform all conversions in sanitize_instruction_name()
             QL_DOUT(" after comma removal, sub ins: " << sub_ins);
             std::istringstream iss(sub_ins);
@@ -740,14 +746,14 @@ Bool Kernel::add_param_decomposed_gate_if_available(
     if (it != platform->instruction_map.end()) {
         QL_DOUT("parameterized gate found for " << instr_parameterized);
         if (it->second->type() == GateType::COMPOSITE) {
-            QL_DOUT("composite gate type");
+            QL_DOUT("gate type is COMPOSITE for " << instr_parameterized);
         } else {
-            QL_DOUT("not a composite gate type");
+            QL_DOUT("not a composite gate type " << instr_parameterized);
             return false;
         }
         auto gptr = it->second.as<gate_types::Composite>();
         if (gptr.empty()) {
-            QL_DOUT("not a composite gate type");
+            QL_DOUT("is composite but gate pointer is empty, so not a composite gate type");
             return false;
         }
 
@@ -800,8 +806,18 @@ Bool Kernel::add_param_decomposed_gate_if_available(
             }
         }
         added = true;
+        QL_DOUT("added composite gate and subinstrs for " << instr_parameterized);
     } else {
-        QL_DOUT("composite gate not found for " << instr_parameterized);
+#ifdef MULTI_LINE_LOG_DEBUG
+        QL_IF_LOG_DEBUG {
+            QL_DOUT("composite gate not found for " << instr_parameterized << " in instruction_map:");
+            for (const auto &i : platform->instruction_map) {
+                QL_DOUT("add_param_decomposed_gate_if_available: platform->instruction_map[]" << i.first);
+            }
+        }
+#else
+        QL_DOUT("composite gate not found for " << instr_parameterized << " in instruction_map (disabled)");
+#endif
     }
     return added;
 }
@@ -1037,6 +1053,17 @@ void Kernel::gate(
     QL_DOUT("Adding decomposed unitary to kernel ...");
     cycles_valid = false;
     gates.extend(u.get_decomposition(qubits));
+}
+
+// adding state prepration / (arbitrary) qubit initialisation to kernel
+void Kernel::state_prep(
+    const Vec<Complex> &array,
+    const Vec<UInt> &qubits
+) {
+    QL_DOUT("Preparing state with array " << array);
+    cycles_valid = false;
+    com::dec::Unitary u("state prep", {array.begin(), array.end()});
+    gates.extend(u.prepare_state(qubits));
 }
 
 /**
